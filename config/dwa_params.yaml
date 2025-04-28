@@ -1,0 +1,26 @@
+dwa_planner:
+  max_speed: 2.5
+  min_speed: -1.5
+  max_yaw_rate: 3.0
+  max_accel: 1.5
+  predict_time: 2
+  goal_tolerance: 0.5
+  resolution_v: 0.1
+  resolution_w: 0.25
+  robot_radius: 0.35
+  window_size: 0.2
+  rate: 10
+
+
+  kcollision: 6
+  khead: 4
+  kvel: 1
+  kforward: 5
+
+  laser_topic: "/unrealros_laser_topic"
+  cmd_topic: "/cmd_vel"
+  target_topic: "/goal"
+  odom_topic: "/odom"
+  base_link: "unrealros_base_link"
+  laser_frame: "laser_frame"
+  odom_frame: "unrealros_odom"
