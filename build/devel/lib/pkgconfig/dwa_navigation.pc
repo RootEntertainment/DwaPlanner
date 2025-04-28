@@ -1,8 +1,0 @@
-prefix=/home/arles/ws_ros/src/dwa_navigation/build/devel
-
-Name: dwa_navigation
-Description: Description of dwa_navigation
-Version: 0.0.0
-Cflags: 
-Libs: -L${prefix}/lib 
-Requires: 
