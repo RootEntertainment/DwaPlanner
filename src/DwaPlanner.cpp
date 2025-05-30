@@ -40,6 +40,7 @@ DwaPlanner::DwaPlanner() : tf_listener_(tf_buffer_) {
     odom_sub_ = nh.subscribe(odom_topic, 1, &DwaPlanner::odomCallback, this);
     cmd_vel_pub_ = nh.advertise<geometry_msgs::Twist>(cmd_topic, 1);
     velocity_marker_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/velocity_sample",1);
+    trajectory_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/best_trajectory",1);
 
     obstacle_pub_ = nh.advertise<sensor_msgs::PointCloud2>("/obstacle_test",1);
 
@@ -70,25 +71,38 @@ void DwaPlanner::laserCallback(const sensor_msgs::LaserScan::ConstPtr& msg) {
     }
 
     sensor_msgs::PointCloud2Modifier modifier(obstacles_);
-    modifier.resize(msg->ranges.size());
+    //modifier.resize(msg->ranges.size());
+    modifier.clear();
 
     sensor_msgs::PointCloud2Iterator<float> iter_x(obstacles_, "x");
     sensor_msgs::PointCloud2Iterator<float> iter_y(obstacles_, "y");
     sensor_msgs::PointCloud2Iterator<float> iter_z(obstacles_, "z");
     double angle = msg->angle_min;
+    int count = 0;
     for(auto& ray : msg->ranges){
-        double x = ray * cos(angle);
-        double y = ray * sin(angle);
+        if(ray < msg->range_max - 0.01f){
+            count ++;
+            double x = ray * cos(angle);
+            double y = ray * sin(angle);
 
-        *iter_x = x;
-        *iter_y = y;
-        *iter_z = 0;
+            modifier.resize(count);
 
+            auto iter = obstacles_.data.end();
+            
+            auto fiter = (float*)((iter-16).base());
+            *fiter = x;
+            *(fiter+1) = y;
+            *(fiter+2) = 0;
+
+            // *iter_x = x;
+            // *iter_y = y;
+            // *iter_z = 0;
+            
+            // ++iter_y;
+            // ++iter_x;
+            // ++iter_z;
+        }
         angle += msg->angle_increment;
-        ++iter_y;
-        ++iter_x;
-        ++iter_z;
-
         //test
         // obt.points.emplace_back();
         // obt.points.back().x = x;
@@ -169,7 +183,7 @@ geometry_msgs::Twist DwaPlanner::computeBestVelocity() {
         Trajectory trajectory = generateTrajectory(vel.v, vel.w);
         vel.dist_score = collision_curve(dist(trajectory, obstacles_in_base));
         vel.heading_score = head_curve(heading(trajectory, goal_in_base));
-        vel.velocity_score = velocity_curve(velocity(vel.v, vel.w));
+        //vel.velocity_score = velocity_curve(velocity(vel.v, vel.w));
     }
 
     evaluateVelocities(velocities);
@@ -177,7 +191,10 @@ geometry_msgs::Twist DwaPlanner::computeBestVelocity() {
     auto best = std::max_element(velocities.begin(), velocities.end(),
         [](const Velocity& a, const Velocity& b) { return a.score < b.score; });
 
-    if(best != velocities.end()) publishVelocityMarker(velocities, best->score);
+    if(best != velocities.end()){
+        publishVelocityMarker(velocities, best->score);
+        publishTrajectorMarker(best->v, best->w);
+    }
 
     geometry_msgs::Twist cmd_vel;
     if (best != velocities.end() && best->score > 0) {
@@ -196,8 +213,8 @@ std::vector<DwaPlanner::Velocity> DwaPlanner::generateVelocitySamples() {
     
     double v_min = std::max(min_speed_, current_v - max_accel_ * window_size_);
     double v_max = std::min(max_speed_, current_v + max_accel_ * window_size_);
-    double w_min = std::max(-max_yaw_rate_, current_w - max_accel_ / robot_radius_ * window_size_);
-    double w_max = std::min(max_yaw_rate_, current_w + max_accel_ / robot_radius_ * window_size_);
+    double w_min = std::max(-max_yaw_rate_, current_w - max_accel_*2 / robot_radius_ * window_size_);
+    double w_max = std::min(max_yaw_rate_, current_w + max_accel_ *2 / robot_radius_ * window_size_);
 
     // 速度采样
     for (double v = v_min; v <= v_max; v += resolution_v_) {
@@ -250,7 +267,9 @@ void DwaPlanner::evaluateVelocity(Velocity& vel, const geometry_msgs::PoseStampe
 }
 void DwaPlanner::evaluateVelocities(std::vector<Velocity> &velocities)
 {
-    //normalize
+    auto [kcollison, khead, kvel] = param_sm_->GetParams();
+    
+
     double dist_sum = 0;
     double heading_sum = 0;
     double velocity_sum = 0;
@@ -258,12 +277,14 @@ void DwaPlanner::evaluateVelocities(std::vector<Velocity> &velocities)
         if(vel.dist_score < 0) continue;
         dist_sum += vel.dist_score;
         heading_sum += vel.heading_score;
+
+        vel.velocity_score = velocity(vel.v, vel.w, kvel);
         velocity_sum += vel.velocity_score;
     }
-
-    auto [kcollison, khead, kvel] = param_sm_->GetParams();
+    
     for (auto& vel : velocities) {
         //vel.score = kcollison * vel.dist_score / dist_sum + khead * vel.heading_score / heading_sum + kvel * vel.velocity_score / velocity_sum;
-        vel.score = kcollison * vel.dist_score + khead * vel.heading_score + kvel * vel.velocity_score;
+        if(vel.dist_score < 0 || vel.heading_score < 0 || vel.velocity_score < 0) vel.score = -1e10;
+        else vel.score = kcollison * vel.dist_score + khead * vel.heading_score + vel.velocity_score;
     }
 }

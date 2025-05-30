@@ -1,9 +1,9 @@
 dwa_planner:
   max_speed: 2.5
   min_speed: -1.5
-  max_yaw_rate: 3.0
-  max_accel: 1.5
-  predict_time: 2
+  max_yaw_rate: 3.5
+  max_accel: 1.8
+  predict_time: 1
   goal_tolerance: 0.5
   resolution_v: 0.1
   resolution_w: 0.25

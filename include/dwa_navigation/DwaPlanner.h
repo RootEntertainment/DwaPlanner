@@ -104,6 +104,54 @@ private:
 
         return marker;
     }
+    visualization_msgs::Marker makePoseMarker(int32_t id, const Pose& pose, std::string frame, std_msgs::ColorRGBA color){
+        visualization_msgs::Marker marker;
+        marker.action = visualization_msgs::Marker::ADD;
+        
+        marker.header.frame_id = frame;
+        marker.header.stamp = ros::Time::now();
+        marker.ns = "sphere_markers";
+        marker.type = visualization_msgs::Marker::SPHERE;
+        marker.scale.x = 0.1;
+        marker.scale.y = 0.1;
+        marker.scale.z = 0.1;
+        marker.id = id;
+        marker.color = color;
+        marker.pose.position.x = pose.x;
+        marker.pose.position.y = pose.y;
+        marker.pose.orientation.w = 1;
+        return marker;
+    }
+    visualization_msgs::Marker makeTrajectoryMarker(int32_t id, const Velocity& velocity, double highest){
+        visualization_msgs::Marker marker;
+        marker.action = visualization_msgs::Marker::ADD;
+        
+        marker.header.frame_id = base_link;
+        marker.header.stamp = ros::Time::now();
+        marker.ns = "velocity_markers";
+        marker.type = visualization_msgs::Marker::SPHERE;
+        marker.scale.x = 0.1;
+        marker.scale.y = 0.1;
+        marker.scale.z = 0.1;
+        marker.id = id;
+
+        Trajectory traj = generateTrajectory(velocity.v, velocity.w);
+        Pose pose = traj.back();
+        marker.pose.position.x = pose.x;
+        marker.pose.position.y = pose.y;
+        marker.pose.orientation.w = 1;
+        if(velocity.score < -1e6){
+            marker.color = Red;
+        }
+        else if(velocity.score == highest){
+            marker.color = Green;
+        }
+        else{
+            marker.color = Blue;
+        }
+
+        return marker;
+    }
 
     void publishVelocityMarker(const std::vector<Velocity>& velocities, double highest){
 
@@ -113,13 +161,31 @@ private:
             // geometry_msgs::Point point;
             // point.x = pose.x;
             // point.y = pose.y;
-            marker_array.markers.push_back(makeMarker(i, velocities[i], highest));
+            marker_array.markers.push_back(makeTrajectoryMarker(i, velocities[i], highest));
         }
         // for(auto& m : marker_array.markers){
         //     m.header.stamp = ros::Time::now();
         // }
 
         velocity_marker_pub_.publish(marker_array);
+    }
+
+    void publishTrajectorMarker(double v, double w){
+
+        visualization_msgs::MarkerArray marker_array = makeMarkerArray();
+        Trajectory traj = generateTrajectory(v, w);
+
+        for(int i=0; i<traj.size(); i++){
+            // geometry_msgs::Point point;
+            // point.x = pose.x;
+            // point.y = pose.y;
+            marker_array.markers.push_back(makePoseMarker(i, traj[i], base_link, Green));
+        }
+        // for(auto& m : marker_array.markers){
+        //     m.header.stamp = ros::Time::now();
+        // }
+
+        trajectory_pub_.publish(marker_array);
     }
 
     geometry_msgs::Twist computeBestVelocity();
@@ -203,8 +269,7 @@ private:
     double collision_curve(double value){
         if(value < robot_radius_) return -1e10;
         if(value > 3*robot_radius_) return 1;
-        return pow((value - robot_radius_) / (2*robot_radius_), 2);
-        //return (value - robot_radius_) / (2*robot_radius_);
+        return (value - robot_radius_) / (2*robot_radius_);
     }
 
     double heading(const Trajectory& trajectory, const geometry_msgs::PoseStamped& target){
@@ -222,12 +287,17 @@ private:
         //return (M_PI - abs(value));
     }
 
-    double velocity(double v, double w){
-        //return (v / max_speed_ + abs(w / max_yaw_rate_)) / 2;
-        return v;
+    //速度
+    double velocity(double v, double w, double kvel){
+        double current_v = odom_data_.twist.twist.linear.x;
+        double v_min = std::max(min_speed_, current_v - max_accel_ * window_size_);
+        double v_max = std::min(max_speed_, current_v + max_accel_ * window_size_);
+
+        if(kvel == 0) return 1-abs(v)/std::max(abs(v_max), abs(v_min));
+        else return kvel * (v-v_min) / (v_max-v_min);
     }
 
-    //归一化曲线
+    //deprecated
     double velocity_curve(double value){
         if(value < 0) return 0;
         double current_v = odom_data_.twist.twist.linear.x;
@@ -271,7 +341,7 @@ private:
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_;
     ros::Subscriber laser_sub_, goal_sub_, odom_sub_;
-    ros::Publisher cmd_vel_pub_, velocity_marker_pub_, obstacle_pub_;
+    ros::Publisher cmd_vel_pub_, velocity_marker_pub_, obstacle_pub_, trajectory_pub_;
     
     // 算法参数
     double max_speed_, min_speed_, max_yaw_rate_, max_accel_;
